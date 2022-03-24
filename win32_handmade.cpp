@@ -48,8 +48,10 @@ global_variable bool Running = true;
 
 using uint8 = uint8_t;
 using uint32 = uint32_t;
+using uint64 = uint64_t;
 using int32 = int32_t;
 using int16 = int16_t;
+using int64 = int64_t;
 using real32 = float;
 using real64 = double;
 
@@ -479,9 +481,23 @@ int WINAPI WinMain(
 
             MSG Message;
             HDC deviceContext = GetDC(WindowHandle);
-            XINPUT_STATE ControllerState;            
+            XINPUT_STATE ControllerState;
+
+            //timing counters
+            LARGE_INTEGER begin_counter, end_counter, performance_frequency;
+            uint64 counter_elapsed, perf_count_frequency;
+            real32 ms_per_frame, frames_per_second, million_cycles_per_frame;
+            QueryPerformanceFrequency(&performance_frequency);
+            perf_count_frequency = performance_frequency.QuadPart;
+            uint64 begin_cycle_count, end_cycle_count, elapsed_cycles;
+
+            //print buffer
+            char buffer[256];
+
             while(Running)
             {
+                QueryPerformanceCounter(&begin_counter);
+                begin_cycle_count = __rdtsc();
                 while(PeekMessage(&Message,WindowHandle,0,0,PM_REMOVE))
                 {
 					if(Message.message == WM_QUIT)
@@ -526,7 +542,25 @@ int WINAPI WinMain(
                 Win32WriteSineWaveToBuffer(sound_buffer,sound_output);
 
                 win32_window_dimension wd = get_window_dimension(WindowHandle);
-				Win32CopyBufferToWindow(deviceContext, wd.Width,wd.Height,global_back_buffer);
+                Win32CopyBufferToWindow(deviceContext, wd.Width,wd.Height,global_back_buffer);
+
+                //get frame timings
+				end_cycle_count = __rdtsc();
+                elapsed_cycles = end_cycle_count - begin_cycle_count;
+                QueryPerformanceCounter(&end_counter);
+
+                counter_elapsed = end_counter.QuadPart - begin_counter.QuadPart;
+                ms_per_frame = static_cast<real32>(((1000*counter_elapsed) / (perf_count_frequency*1.0f)));
+                frames_per_second = static_cast<real32>(perf_count_frequency / (1.0f * counter_elapsed));
+                million_cycles_per_frame = static_cast<real32>(elapsed_cycles / 1'000'000.0f);
+
+                sprintf(buffer,
+                        "Milliseconds/frame: %.02f, FPS: %.02f, million cycles per frame: %.02f",
+                        ms_per_frame, 
+                        frames_per_second,
+                        million_cycles_per_frame);
+            
+                printf("%s\n",buffer);
             }
 			ReleaseDC(WindowHandle,deviceContext);
         }
