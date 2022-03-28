@@ -19,6 +19,7 @@
 #endif
 
 typedef int8_t int8;
+typedef uint8_t uint8;
 typedef int16_t int16;
 typedef int32_t int32;
 typedef int64_t int64;
@@ -316,50 +317,72 @@ LRESULT CALLBACK WindowProc(HWND Window,
     return result;
 }
 
-void Win32WriteSineWaveToBuffer(LPDIRECTSOUNDBUFFER sound_buffer, win32_sound_output &sound_output)
+internal void
+Win32ClearSoundBuffer(LPDIRECTSOUNDBUFFER sound_buffer,win32_sound_output &sound_output)
 {
-    DWORD write_cursor, play_cursor;
     LPVOID region_1, region_2;
     DWORD region_1_size, region_2_size, bytes_to_write;
 
-    if(SUCCEEDED(sound_buffer->GetCurrentPosition(&play_cursor,&write_cursor)))    
+    if(
+        SUCCEEDED(
+            sound_buffer->Lock(
+                0,sound_output.buffer_size, 
+                &region_1,&region_1_size,
+                &region_2,&region_2_size,0
+            )
+        )
+    )
     {
-        DWORD byte_to_lock = (sound_output.running_sample_index * sound_output.bytes_per_sample) % sound_output.buffer_size;
-        DWORD target_cursor = (play_cursor + (sound_output.latency_sample_count*sound_output.bytes_per_sample)) % sound_output.buffer_size;
-        if(byte_to_lock == target_cursor){}
-        if(byte_to_lock > target_cursor)
+        auto dest_sample = reinterpret_cast<uint8*>(region_1);
+        
+        for(DWORD sample_index = 0; sample_index < region_1_size; ++sample_index)
         {
-            bytes_to_write = sound_output.buffer_size - byte_to_lock;
-            bytes_to_write += target_cursor;
+            *dest_sample++ = 0;//write to left
         }
-        else
+        
+        dest_sample = reinterpret_cast<uint8*>(region_2);
+        for(DWORD sample_index = 0; sample_index < region_2_size; ++sample_index)
         {
-            bytes_to_write = target_cursor - byte_to_lock;
+            *dest_sample++ = 0;//write to left
         }
+        
+        //unlock the secondary buffer
+        sound_buffer->Unlock(region_1,region_1_size,region_2,region_2_size);
+    }        
+}
 
-        if(SUCCEEDED(sound_buffer->Lock(write_cursor,bytes_to_write, &region_1,&region_1_size,&region_2,&region_2_size,0)))
+void Win32FillSoundBuffer(LPDIRECTSOUNDBUFFER sound_buffer, win32_sound_output &sound_output,
+                          game_sound_output_buffer& source, DWORD byte_to_lock, DWORD bytes_to_write)
+{
+    DWORD write_cursor, play_cursor;
+    LPVOID region_1, region_2;
+    DWORD region_1_size, region_2_size;
+    local_persistent bool sound_is_valid = false;
+
+    if(SUCCEEDED(sound_buffer->GetCurrentPosition(&play_cursor,&write_cursor)))
+        sound_is_valid = true;
+
+    if(sound_is_valid)    
+    {
+
+        if(SUCCEEDED(sound_buffer->Lock(byte_to_lock,bytes_to_write, &region_1,&region_1_size,&region_2,&region_2_size,0)))
         {
             DWORD region_1_sample_count = region_1_size / sound_output.bytes_per_sample, region_2_sample_count = region_2_size / sound_output.bytes_per_sample;
-            auto sample = reinterpret_cast<int16*>(region_1);
+            auto dest_sample = reinterpret_cast<int16*>(region_1);
+            auto source_sample = source.samples;
             
             for(DWORD sample_index = 0; sample_index < region_1_sample_count; ++sample_index)
             {
-                real32 sine_value = sin(sound_output.tSine);
-                int16 sample_value = (int16)(sine_value * sound_output.tone_volume);
-                *sample++ = sample_value;//write to left
-                *sample++ = sample_value;//write to right
-                sound_output.tSine += (2.0f * Pi32* 1.0f) / (real32)sound_output.wave_period;
+                *dest_sample++ = *source_sample++;//write to left
+                *dest_sample++ = *source_sample++;//write to right
                 ++sound_output.running_sample_index; 
             }
             
-            sample = reinterpret_cast<int16*>(region_2);
+            dest_sample = reinterpret_cast<int16*>(region_2);
             for(DWORD sample_index = 0; sample_index < region_2_sample_count; ++sample_index)
             {
-                real32 sine_value = sin(sound_output.tSine);
-                int16 sample_value = (int16)(sine_value * sound_output.tone_volume);
-                *sample++ = sample_value;//write to left
-                *sample++ = sample_value;//write to right
-                sound_output.tSine += (2.0f * Pi32) / (real32)sound_output.wave_period;
+                *dest_sample++ = *source_sample++;//write to left
+                *dest_sample++ = *source_sample++;//write to right
                 ++sound_output.running_sample_index; 
             }
             
@@ -409,15 +432,18 @@ int WINAPI WinMain(
             MSG message;
             HDC deviceContext = GetDC(WindowHandle);
             XINPUT_STATE ControllerState;
+            bool sound_is_valid = false;
             
             //sound test variables and setup
+            int tone_hz = 256;
             win32_sound_output sound_output = {};
-            auto sound_buffer = Win32InitDSound(WindowHandle, sound_output.samples_per_second, sound_output.buffer_size);
+            auto direct_sound_buffer = Win32InitDSound(WindowHandle, sound_output.samples_per_second, sound_output.buffer_size);
             sound_output.latency_sample_count = sound_output.samples_per_second / 15;
+            int16* samples = reinterpret_cast<int16*>(VirtualAlloc(NULL,sound_output.buffer_size,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
             
-            Win32WriteSineWaveToBuffer(sound_buffer, sound_output);
-            sound_buffer->Play(0,0,DSBPLAY_LOOPING);
-
+            Win32ClearSoundBuffer(direct_sound_buffer,sound_output);
+            direct_sound_buffer->Play(0,0,DSBPLAY_LOOPING);
+            
             //timing counters
             LARGE_INTEGER begin_counter, end_counter, performance_frequency;
             uint64 counter_elapsed, perf_count_frequency;
@@ -470,17 +496,39 @@ int WINAPI WinMain(
                     }
                 }
 
+                DWORD play_cursor, write_cursor, target_cursor;
+                DWORD bytes_to_write, byte_to_lock;
+                if(SUCCEEDED(direct_sound_buffer->GetCurrentPosition(&play_cursor,&write_cursor)))
+                {
+                    byte_to_lock = ((sound_output.running_sample_index*sound_output.bytes_per_sample) % sound_output.buffer_size);
+
+                    target_cursor = ((play_cursor + (sound_output.latency_sample_count*sound_output.bytes_per_sample)) % sound_output.buffer_size);
+
+                    if(byte_to_lock > target_cursor)
+                    {
+                        bytes_to_write = (sound_output.buffer_size - byte_to_lock);
+                        bytes_to_write += target_cursor;
+                    }
+                    else
+                        bytes_to_write = target_cursor - byte_to_lock;
+                    sound_is_valid = true;
+                }
+
+                game_sound_output_buffer game_sound_buffer = {};
+                game_sound_buffer.samples_per_second = sound_output.samples_per_second;
+                game_sound_buffer.sample_count_to_output = bytes_to_write / sound_output.bytes_per_sample;
+                game_sound_buffer.samples = samples; 
+
                 game_offscreen_buffer off_buffer = {};
                 off_buffer.Height = global_back_buffer.Height;
                 off_buffer.Width = global_back_buffer.Width;
                 off_buffer.Memory = global_back_buffer.Memory;
                 off_buffer.Pitch  = global_back_buffer.Pitch;
 
-				GameUpdateAndRender(off_buffer, xOffset, yOffset);
-                
+				GameUpdateAndRender(off_buffer,game_sound_buffer, xOffset, yOffset, tone_hz);
+
                 //sound output test
-                //Win32WriteSquareWaveToBuffer(sound_buffer,buffer_size, running_sample_index);
-                Win32WriteSineWaveToBuffer(sound_buffer,sound_output);
+                Win32FillSoundBuffer(direct_sound_buffer,sound_output, game_sound_buffer, byte_to_lock, bytes_to_write);
 
                 win32_window_dimension wd = get_window_dimension(WindowHandle);
                 Win32CopyBufferToWindow(deviceContext, wd.Width,wd.Height,global_back_buffer);

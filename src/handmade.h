@@ -1,9 +1,17 @@
 #pragma once
-struct game_offscreen_buffer{
+struct game_offscreen_buffer
+{
 	void* Memory;
 	int Width;
 	int Height;
 	int Pitch;
+};
+
+struct game_sound_output_buffer
+{
+    int sample_count_to_output;
+    int samples_per_second;
+    int16_t *samples;
 };
 
 /*
@@ -16,4 +24,4 @@ struct game_offscreen_buffer{
 */
 
 //needs four things - timing, controller/keyboard input, bitmap to output, sound to output
-static void GameUpdateAndRender(game_offscreen_buffer&, int BlueOffset, int GreenOffset);
+static void GameUpdateAndRender(game_offscreen_buffer&,game_sound_output_buffer& ,int BlueOffset, int GreenOffset, int tone_hz);
