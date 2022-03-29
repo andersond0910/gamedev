@@ -1,48 +1,11 @@
-#include<windows.h>
-#include<stdint.h>
+#include "win32_handmade.h"
 #include<Xinput.h>
 #include<dsound.h>
 #include<stdio.h>
-#include<cmath>
+#include<algorithm>
+#include<type_traits>
+#include "handmade.h"
 #include "handmade.cpp"
-
-#ifndef global_variable
-#define global_variable static
-#endif
-
-#ifndef local_persistent
-#define local_persistent static
-#endif
-
-#ifndef internal
-#define internal static
-#endif
-
-typedef int8_t int8;
-typedef uint8_t uint8;
-typedef int16_t int16;
-typedef int32_t int32;
-typedef int64_t int64;
-typedef uint32_t uint32;
-typedef uint64_t uint64;
-typedef float real32;
-typedef double real64;
-
-struct win32_offscreen_buffer{
-	BITMAPINFO Info;
-	void* Memory;
-	int Width;
-	int Height;
-	int BytesPerPixel = 4;
-	int Pitch;
-	int MemorySize;
-};
-
-struct win32_window_dimension
-{
-	int Width;
-	int Height;
-};
 
 internal win32_window_dimension get_window_dimension(HWND Window)
 {
@@ -58,19 +21,6 @@ global_variable win32_offscreen_buffer global_back_buffer;
 global_variable bool Running = true;
 
 const real32 Pi32 = 3.14159265359;
-
-struct win32_sound_output
-{
-    int16 tone_volume = 3000;
-    int32 samples_per_second = 48000;
-    int32 bytes_per_sample = sizeof(int16)*2;
-    int32 Hz = 256;
-    uint32 wave_period = samples_per_second/Hz;
-    uint32 running_sample_index = 0;
-    uint32 buffer_size = samples_per_second * bytes_per_sample;
-    real32 tSine = 0;
-    int latency_sample_count;
-};
 
 //Stubs for XInput State Windows functions.  This allows use program to not have to use xbox controllers when it isn't available.  Input can 
 //be taken from the keyboard
@@ -392,6 +342,17 @@ void Win32FillSoundBuffer(LPDIRECTSOUNDBUFFER sound_buffer, win32_sound_output &
     }
 }
 
+internal void Win32ProcessXInputDigitalButton(game_button_state& old_state, game_button_state& new_state, DWORD button_state, DWORD button_bit)
+{
+    new_state.ended_down = (button_state & button_bit) == button_bit;
+    new_state.half_transition_count = old_state.ended_down != new_state.ended_down ? 1 : 0;
+}
+
+template<typename T>
+internal size_t array_count(T array[])
+{
+    return sizeof(*array) / sizeof(array[0]);
+}
 
 int WINAPI WinMain(
     HINSTANCE hInstance,
@@ -436,12 +397,12 @@ int WINAPI WinMain(
             
             //sound test variables and setup
             int tone_hz = 256;
-            win32_sound_output sound_output = {};
-            auto direct_sound_buffer = Win32InitDSound(WindowHandle, sound_output.samples_per_second, sound_output.buffer_size);
-            sound_output.latency_sample_count = sound_output.samples_per_second / 15;
-            int16* samples = reinterpret_cast<int16*>(VirtualAlloc(NULL,sound_output.buffer_size,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+            win32_sound_output win32_sound_config = {};
+            auto direct_sound_buffer = Win32InitDSound(WindowHandle, win32_sound_config.samples_per_second, win32_sound_config.buffer_size);
+            win32_sound_config.latency_sample_count = win32_sound_config.samples_per_second / 15;
+            int16* samples = reinterpret_cast<int16*>(VirtualAlloc(NULL,win32_sound_config.buffer_size,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
             
-            Win32ClearSoundBuffer(direct_sound_buffer,sound_output);
+            Win32ClearSoundBuffer(direct_sound_buffer,win32_sound_config);
             direct_sound_buffer->Play(0,0,DSBPLAY_LOOPING);
             
             //timing counters
@@ -454,6 +415,15 @@ int WINAPI WinMain(
 
             //print buffer
             char buffer[256];
+
+            //controller input
+            game_input controller_input[2] = {}, \
+                       old_input = controller_input[0], \
+                       new_input = controller_input[1];
+
+            int num_controllers = array_count(new_input.controllers);
+
+            int max_controller_count = XUSER_MAX_COUNT > num_controllers ? num_controllers : XUSER_MAX_COUNT;                                       
 
             while(Running)
             {
@@ -478,21 +448,49 @@ int WINAPI WinMain(
                         bool dPadDown = (Pad->wButtons & XINPUT_GAMEPAD_DPAD_DOWN);
                         bool dPadLeft = (Pad->wButtons & XINPUT_GAMEPAD_DPAD_LEFT);
                         bool dPadRight = (Pad->wButtons & XINPUT_GAMEPAD_DPAD_RIGHT);
-                        bool gPadStart = (Pad->wButtons & XINPUT_GAMEPAD_START);
-                        bool gPadBack = (Pad->wButtons & XINPUT_GAMEPAD_BACK);	
-                        bool gPadLftShldr = (Pad->wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER);	
-                        bool gPadRghtShldr = (Pad->wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER);	
-                        bool gPadButtonA = (Pad->wButtons & XINPUT_GAMEPAD_A); 
-                        bool gPadButtonB = (Pad->wButtons & XINPUT_GAMEPAD_B);	
-                        bool gPadButtonX = (Pad->wButtons & XINPUT_GAMEPAD_X);	
-                        bool dPadButtonY = (Pad->wButtons & XINPUT_GAMEPAD_Y);
-
                         int16 StickX = Pad->sThumbLX;
                         int16 StickY = Pad->sThumbRX;
 
-                        //joke match sound to xbox controller stick
-                        sound_output.Hz = 512 + (int32)(256.0f*((real32)StickY / 30000.0f));
-                        sound_output.wave_period = sound_output.samples_per_second/sound_output.Hz;
+                        game_controller_input old_controller = old_input.controllers[controllerIndex];
+                        game_controller_input new_controller = new_input.controllers[controllerIndex];
+
+                        new_controller.is_analog = true;
+                        new_controller.start_x = old_controller.end_x;
+                        new_controller.start_y = old_controller.end_y;
+
+                        real32 x = StickX < 0 ? (real32)StickX / 32768.0f : (real32)StickX / 32767.0f;
+                        real32 y = StickY < 0 ? (real32)StickY / 32768.0f : (real32)StickY / 32767.0f;
+
+                        new_controller.min_x = new_controller.max_x = new_controller.end_x = x; 
+                        new_controller.min_y = new_controller.max_y = new_controller.end_y = y; 
+
+                        Win32ProcessXInputDigitalButton(old_controller.down,
+                                                        new_controller.down,
+                                                        Pad->wButtons, 
+                                                        XINPUT_GAMEPAD_A);
+
+                        Win32ProcessXInputDigitalButton(old_controller.right,
+                                                        new_controller.right,
+                                                        Pad->wButtons, XINPUT_GAMEPAD_B);
+
+                        Win32ProcessXInputDigitalButton(old_controller.left,
+                                                        new_controller.left,
+                                                        Pad->wButtons, XINPUT_GAMEPAD_X);
+
+                        Win32ProcessXInputDigitalButton(old_controller.up,
+                                                        new_controller.up,
+                                                        Pad->wButtons, XINPUT_GAMEPAD_Y);
+
+                        Win32ProcessXInputDigitalButton(old_controller.left_shoulder,
+                                                        new_controller.left_shoulder,
+                                                        Pad->wButtons, XINPUT_GAMEPAD_LEFT_SHOULDER);
+
+                        Win32ProcessXInputDigitalButton(old_controller.right_shoulder,
+                                                        new_controller.right_shoulder,
+                                                        Pad->wButtons, XINPUT_GAMEPAD_RIGHT_SHOULDER);
+
+                        bool gPadStart = (Pad->wButtons & XINPUT_GAMEPAD_START);
+                        bool gPadBack = (Pad->wButtons & XINPUT_GAMEPAD_BACK);	
                     }
                 }
 
@@ -500,13 +498,13 @@ int WINAPI WinMain(
                 DWORD bytes_to_write, byte_to_lock;
                 if(SUCCEEDED(direct_sound_buffer->GetCurrentPosition(&play_cursor,&write_cursor)))
                 {
-                    byte_to_lock = ((sound_output.running_sample_index*sound_output.bytes_per_sample) % sound_output.buffer_size);
+                    byte_to_lock = ((win32_sound_config.running_sample_index*win32_sound_config.bytes_per_sample) % win32_sound_config.buffer_size);
 
-                    target_cursor = ((play_cursor + (sound_output.latency_sample_count*sound_output.bytes_per_sample)) % sound_output.buffer_size);
+                    target_cursor = ((play_cursor + (win32_sound_config.latency_sample_count*win32_sound_config.bytes_per_sample)) % win32_sound_config.buffer_size);
 
                     if(byte_to_lock > target_cursor)
                     {
-                        bytes_to_write = (sound_output.buffer_size - byte_to_lock);
+                        bytes_to_write = (win32_sound_config.buffer_size - byte_to_lock);
                         bytes_to_write += target_cursor;
                     }
                     else
@@ -515,20 +513,20 @@ int WINAPI WinMain(
                 }
 
                 game_sound_output_buffer game_sound_buffer = {};
-                game_sound_buffer.samples_per_second = sound_output.samples_per_second;
-                game_sound_buffer.sample_count_to_output = bytes_to_write / sound_output.bytes_per_sample;
+                game_sound_buffer.samples_per_second = win32_sound_config.samples_per_second;
+                game_sound_buffer.sample_count_to_output = bytes_to_write / win32_sound_config.bytes_per_sample;
                 game_sound_buffer.samples = samples; 
 
-                game_offscreen_buffer off_buffer = {};
-                off_buffer.Height = global_back_buffer.Height;
-                off_buffer.Width = global_back_buffer.Width;
-                off_buffer.Memory = global_back_buffer.Memory;
-                off_buffer.Pitch  = global_back_buffer.Pitch;
+                game_offscreen_buffer game_display = {};
+                game_display.Height = global_back_buffer.Height;
+                game_display.Width = global_back_buffer.Width;
+                game_display.Memory = global_back_buffer.Memory;
+                game_display.Pitch  = global_back_buffer.Pitch;
 
-				GameUpdateAndRender(off_buffer,game_sound_buffer, xOffset, yOffset, tone_hz);
+				GameUpdateAndRender(new_input, game_display,game_sound_buffer);
 
                 //sound output test
-                Win32FillSoundBuffer(direct_sound_buffer,sound_output, game_sound_buffer, byte_to_lock, bytes_to_write);
+                Win32FillSoundBuffer(direct_sound_buffer,win32_sound_config, game_sound_buffer, byte_to_lock, bytes_to_write);
 
                 win32_window_dimension wd = get_window_dimension(WindowHandle);
                 Win32CopyBufferToWindow(deviceContext, wd.Width,wd.Height,global_back_buffer);
@@ -551,6 +549,7 @@ int WINAPI WinMain(
                         million_cycles_per_frame);
             
                 printf("%s\n",buffer);*/
+                std::swap(new_input,old_input);
             }
 			ReleaseDC(WindowHandle,deviceContext);
         }
