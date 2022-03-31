@@ -1,9 +1,9 @@
 #pragma once
 
 #ifdef HANDMADE_SLOW
-    #include<cassert>
+    #define Assert(Expression) if(!(Expression)) {*(int *)0 = 0;}
 #else
-    #define NDEBUG
+    #define Assert(Expression)
 #endif
 
 template<typename T >

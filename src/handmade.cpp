@@ -37,7 +37,7 @@ internal void RenderWeirdGradient(game_offscreen_buffer& buffer, int blue_offset
 
 internal void GameUpdateAndRender(game_memory& memory, game_input& input,game_offscreen_buffer& buffer,game_sound_output_buffer& sound_buffer)
 {
-    assert(sizeof(game_state) <= memory.permanent_storage_size);
+    Assert(sizeof(game_state) <= memory.permanent_storage_size);
     auto state = reinterpret_cast<game_state*>(memory.permanent_memory);
     auto player_1 = input.controllers[0];
 

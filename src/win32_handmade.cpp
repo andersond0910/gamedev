@@ -434,7 +434,7 @@ int WINAPI WinMain(
             
             uint64 total_memory = g_memory.permanent_storage_size + g_memory.transient_storage_size;
             g_memory.permanent_memory = VirtualAlloc(base_address,total_memory,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE);
-            g_memory.transient_storage = ((uint8*)g_memory.permanent_memory + g_memory.permanent_storage_size);
+            g_memory.transient_storage = reinterpret_cast<uint8*>(&g_memory.permanent_memory + g_memory.permanent_storage_size);
             
             if(samples && g_memory.permanent_memory && g_memory.transient_storage)
             {
