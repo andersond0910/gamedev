@@ -1,5 +1,7 @@
 #pragma once
 #include<windows.h>
+#include<Xinput.h>
+#include<dsound.h>
 #include<cstdint>
 
 struct win32_offscreen_buffer{

@@ -1,5 +1,36 @@
 #pragma once
 
+#ifdef HANDMADE_SLOW
+    #include<cassert>
+#else
+    #define NDEBUG
+#endif
+
+template<typename T >
+constexpr T kilobytes(T num_bytes)
+{
+    return num_bytes * 1024;
+}
+
+template<typename T >
+constexpr T megabytes(T num_bytes)
+{
+    return kilobytes(num_bytes) * 1024;
+}
+
+template<typename T >
+constexpr T gigabytes(T num_bytes)
+{
+    return megabytes(num_bytes) * 1024;
+}
+
+template<typename T >
+constexpr T terabytes(T num_bytes)
+{
+    return gigabytes(num_bytes) * 1024;
+}
+
+
 #ifndef global_variable
 #define global_variable static
 #endif
@@ -73,8 +104,26 @@ struct game_controller_input
 
 struct game_input
 {
+    //TODO - insert clock value here
     game_controller_input controllers[4];
 };
+
+struct game_memory
+{
+    bool is_initialized;
+    uint64 permanent_storage_size;
+    uint64 transient_storage_size;
+    void* permanent_memory;
+    void* transient_storage;
+};
+
+struct game_state
+{
+    int blue_offset;
+    int green_offset = 0; 
+    int tone_hz = 256;
+};
+
 
 /*
     services that the platform layer provides to the game
@@ -86,4 +135,4 @@ struct game_input
 */
 
 //needs four things - timing, controller/keyboard input, bitmap to output, sound to output
-static void GameUpdateAndRender(game_input& input,game_offscreen_buffer&,game_sound_output_buffer&);
+static void GameUpdateAndRender(game_memory*,game_input& input,game_offscreen_buffer&,game_sound_output_buffer&);

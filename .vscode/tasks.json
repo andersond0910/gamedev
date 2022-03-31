@@ -7,6 +7,8 @@
 			"command": "C:/Users/VV544VU/scoop/apps/msys2/2022-01-28/mingw64/bin/g++.exe",
 			"args": [
 				"-fdiagnostics-color=always",
+				//"-DHANDMADE_INTERNAL",
+				"-DHANDMADE_SLOW",
 				"-g",
 				"${file}",
 				"-o",

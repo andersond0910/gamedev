@@ -1,5 +1,3 @@
-#include<cstdint>
-#include<cmath>
 #include "handmade.h"
 
 internal void OutputGameSound(game_sound_output_buffer& sound_buffer, int tone_hz)
@@ -21,7 +19,7 @@ internal void OutputGameSound(game_sound_output_buffer& sound_buffer, int tone_h
     }
 }
 
-internal void RenderWeirdGradient(game_offscreen_buffer& buffer, int& blue_offset, int green_offset)
+internal void RenderWeirdGradient(game_offscreen_buffer& buffer, int blue_offset, int green_offset)
 {
 	auto Row = reinterpret_cast<uint8_t*>(buffer.Memory);
 	for(int y=0;y<buffer.Height;++y)
@@ -37,16 +35,24 @@ internal void RenderWeirdGradient(game_offscreen_buffer& buffer, int& blue_offse
 	}
 }
 
-internal void GameUpdateAndRender(game_input& input,game_offscreen_buffer& buffer,game_sound_output_buffer& sound_buffer)
+internal void GameUpdateAndRender(game_memory& memory, game_input& input,game_offscreen_buffer& buffer,game_sound_output_buffer& sound_buffer)
 {
-    local_persistent int blue_offset = 0, green_offset = 0, tone_hz = 256;
-    game_controller_input player_1 = input.controllers[0];
+    assert(sizeof(game_state) <= memory.permanent_storage_size);
+    auto state = reinterpret_cast<game_state*>(memory.permanent_memory);
+    auto player_1 = input.controllers[0];
+
+    //TODO should be moved to platform layer
+    if(!memory.is_initialized)
+    {
+        state->tone_hz = 256;
+        memory.is_initialized = true;
+    }
 
     //TODO: needs tuning for analog movement
     if(player_1.is_analog)
     {
-        tone_hz = 256 + static_cast<int>(128.0f * (player_1.end_x));
-        blue_offset += static_cast<int>(4.0f*player_1.end_y);
+        state->tone_hz = 256 + static_cast<int>(128.0f * (player_1.end_x));
+        state->blue_offset += static_cast<int>(4.0f*player_1.end_y);
     }
     //needs tuning for digital movement
     else
@@ -56,9 +62,9 @@ internal void GameUpdateAndRender(game_input& input,game_offscreen_buffer& buffe
 
     if(player_1.down.ended_down)
     {
-        green_offset += 1;
+        state->green_offset += 1;
     }
 
-    OutputGameSound(sound_buffer, tone_hz);
-    RenderWeirdGradient(buffer,blue_offset, green_offset);
+    OutputGameSound(sound_buffer, state->tone_hz);
+    RenderWeirdGradient(buffer,state->blue_offset, state->green_offset);
 }
