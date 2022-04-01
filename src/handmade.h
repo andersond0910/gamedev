@@ -6,6 +6,7 @@
     #define Assert(Expression)
 #endif
 
+
 template<typename T >
 constexpr T kilobytes(T num_bytes)
 {
@@ -124,11 +125,22 @@ struct game_state
     int tone_hz = 256;
 };
 
+uint32 safe_truncate_uint_64(uint64 file_size)
+{
+    Assert(file_size <= 0xFFFFFFFF);
+    auto result = static_cast<uint32>(file_size);
+    return result;
+}
+
 
 /*
     services that the platform layer provides to the game
 */
-
+#ifdef HANDMADE_INTERNAL
+    internal void *debug_platform_read_entire_file(char* filename);
+    internal void debug_platform_free_file_memory(void *bitmap_memory);
+    internal bool debug_platform_write_entire_file(char* filename, uint64 memory_size, void *memory);
+#endif
 
 /*
     services that the game provides to the platform layer

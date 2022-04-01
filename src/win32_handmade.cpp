@@ -114,8 +114,6 @@ Win32XLoadInput()
     XInputSetState = reinterpret_cast<x_input_set_state*>(GetProcAddress(XInputLdLbry,"XInputSetState"));
 }
 
-
-
 internal void
 Win32ResizeDIBSection(win32_offscreen_buffer& buffer,int width, int height)
 {
@@ -349,6 +347,119 @@ template<typename T>
 internal size_t array_count(T array[])
 {
     return sizeof(*array) / sizeof(array[0]);
+}
+
+internal void debug_platform_free_file_memory(void *memory)
+{
+    if(memory)
+    {
+        VirtualFree(memory, 0, MEM_RELEASE);
+    }
+}
+
+internal bool debug_platform_write_entire_file(char* filename, uint64 memory_size, void *memory)
+{
+
+    LPCSTR                lpFileName = filename;
+    DWORD                 dwDesiredAccess = GENERIC_WRITE;
+    DWORD                 dwShareMode = 0;
+    LPSECURITY_ATTRIBUTES lpSecurityAttributes = NULL;
+    DWORD                 dwCreationDisposition = CREATE_ALWAYS;
+    DWORD                 dwFlagsAndAttributes = FILE_ATTRIBUTE_NORMAL;
+    HANDLE                hTemplateFile = NULL;
+    bool result = false;
+    DWORD bytes_read;
+   
+   auto file_handle = CreateFileA(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+
+   if(file_handle != INVALID_HANDLE_VALUE)
+   {
+       LPCVOID      lpBuffer = memory;
+       DWORD        nNumberOfBytesToWrite = memory_size;
+       DWORD        lpNumberOfBytesWritten;
+       LPOVERLAPPED lpOverlapped = NULL;
+
+       auto error_flag = WriteFile (file_handle, lpBuffer, nNumberOfBytesToWrite, &lpNumberOfBytesWritten, lpOverlapped
+       );
+
+       if(error_flag && memory_size == lpNumberOfBytesWritten)
+       {
+           result = true;
+       }
+       else
+       {
+           //log error
+       }
+       CloseHandle(file_handle);
+   }
+   else
+   {
+       //handle error
+   }
+
+   return result;
+}
+
+internal void *debug_platform_read_entire_file(char* filename)
+{
+   LPCSTR                lpFileName = filename;
+   DWORD                 dwDesiredAccess = GENERIC_READ;
+   DWORD                 dwShareMode = FILE_SHARE_READ;
+   LPSECURITY_ATTRIBUTES lpSecurityAttributes = NULL;
+   DWORD                 dwCreationDisposition = OPEN_EXISTING;
+   DWORD                 dwFlagsAndAttributes = FILE_ATTRIBUTE_NORMAL;
+   HANDLE                hTemplateFile = NULL;
+   void* result = NULL;
+   DWORD bytes_read;
+   
+   auto file_handle = CreateFileA(
+     lpFileName,
+     dwDesiredAccess,
+     dwShareMode,
+     lpSecurityAttributes,
+     dwCreationDisposition,
+     dwFlagsAndAttributes,
+     hTemplateFile
+   );
+   
+   if(file_handle != INVALID_HANDLE_VALUE)
+   {
+       LARGE_INTEGER file_size;
+       if(GetFileSizeEx(file_handle,&file_size))
+       {
+           uint32 file_size_32 = safe_truncate_uint_64(file_size.QuadPart);
+           result = VirtualAlloc(NULL, file_size_32, MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE);
+           if(result)
+           {
+               if(ReadFile(file_handle, result, file_size_32, &bytes_read, NULL) &&
+                  file_size_32 == bytes_read)
+               {
+
+               }
+               else
+               {
+                   //add logging
+                   debug_platform_free_file_memory(result);
+                   result = NULL;
+               }
+           }
+           else
+           {
+               //add logging
+           }
+           CloseHandle(file_handle);
+       }
+       else
+       {
+           //add logging
+       }
+   }
+   else
+   {
+       //add logging
+   }
+
+   return result;
 }
 
 int WINAPI WinMain(

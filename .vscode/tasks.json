@@ -9,6 +9,7 @@
 				"-fdiagnostics-color=always",
 				//"-DHANDMADE_INTERNAL",
 				"-DHANDMADE_SLOW",
+				"-DHANDMADE_INTERNAL",
 				"-g",
 				"${file}",
 				"-o",

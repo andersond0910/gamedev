@@ -44,6 +44,11 @@ internal void GameUpdateAndRender(game_memory& memory, game_input& input,game_of
     //TODO should be moved to platform layer
     if(!memory.is_initialized)
     {
+        char* filename = "test.bmp";
+        void* bitmap_memory = debug_platform_read_entire_file(filename);
+        if(bitmap_memory)
+            debug_platform_free_file_memory(bitmap_memory);
+        
         state->tone_hz = 256;
         memory.is_initialized = true;
     }
