@@ -46,7 +46,8 @@ Win32InitDSound(HWND Window, int32 SamplesPerSecond, int32 BufferSize)
     if(DirectSoundLibrary)
     {
         LPDIRECTSOUND direct_sound;
-        if(auto direct_sound_create = DirectSoundCreate(NULL,&direct_sound,NULL); SUCCEEDED(direct_sound_create)){
+        if(auto direct_sound_create = DirectSoundCreate(NULL,&direct_sound,NULL); SUCCEEDED(direct_sound_create))
+        {
             
             WAVEFORMATEX WaveFormat = {};
             WaveFormat.wFormatTag      = WAVE_FORMAT_PCM;
@@ -266,7 +267,7 @@ internal void
 Win32ClearSoundBuffer(LPDIRECTSOUNDBUFFER sound_buffer,win32_sound_output &sound_output)
 {
     LPVOID region_1, region_2;
-    DWORD region_1_size, region_2_size, bytes_to_write;
+    DWORD region_1_size, region_2_size;
 
     if(
         SUCCEEDED(
@@ -360,15 +361,14 @@ internal void debug_platform_free_file_memory(void *memory)
 internal bool debug_platform_write_entire_file(char* filename, uint64 memory_size, void *memory)
 {
 
-    LPCSTR                lpFileName = filename;
-    DWORD                 dwDesiredAccess = GENERIC_WRITE;
-    DWORD                 dwShareMode = 0;
-    LPSECURITY_ATTRIBUTES lpSecurityAttributes = NULL;
-    DWORD                 dwCreationDisposition = CREATE_ALWAYS;
-    DWORD                 dwFlagsAndAttributes = FILE_ATTRIBUTE_NORMAL;
-    HANDLE                hTemplateFile = NULL;
-    bool result = false;
-    DWORD bytes_read;
+   LPCSTR                lpFileName = filename;
+   DWORD                 dwDesiredAccess = GENERIC_WRITE;
+   DWORD                 dwShareMode = 0;
+   LPSECURITY_ATTRIBUTES lpSecurityAttributes = NULL;
+   DWORD                 dwCreationDisposition = CREATE_ALWAYS;
+   DWORD                 dwFlagsAndAttributes = FILE_ATTRIBUTE_NORMAL;
+   HANDLE                hTemplateFile = NULL;
+   bool result = false;
    
    auto file_handle = CreateFileA(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
 
@@ -379,8 +379,7 @@ internal bool debug_platform_write_entire_file(char* filename, uint64 memory_siz
        DWORD        lpNumberOfBytesWritten;
        LPOVERLAPPED lpOverlapped = NULL;
 
-       auto error_flag = WriteFile (file_handle, lpBuffer, nNumberOfBytesToWrite, &lpNumberOfBytesWritten, lpOverlapped
-       );
+       auto error_flag = WriteFile (file_handle, lpBuffer, nNumberOfBytesToWrite, &lpNumberOfBytesWritten, lpOverlapped);
 
        if(error_flag && memory_size == lpNumberOfBytesWritten)
        {
@@ -400,7 +399,7 @@ internal bool debug_platform_write_entire_file(char* filename, uint64 memory_siz
    return result;
 }
 
-internal void *debug_platform_read_entire_file(char* filename)
+internal game_file_data debug_platform_read_entire_file(char* filename)
 {
    LPCSTR                lpFileName = filename;
    DWORD                 dwDesiredAccess = GENERIC_READ;
@@ -410,6 +409,7 @@ internal void *debug_platform_read_entire_file(char* filename)
    DWORD                 dwFlagsAndAttributes = FILE_ATTRIBUTE_NORMAL;
    HANDLE                hTemplateFile = NULL;
    void* result = NULL;
+   game_file_data file_data = {};
    DWORD bytes_read;
    
    auto file_handle = CreateFileA(
@@ -434,7 +434,8 @@ internal void *debug_platform_read_entire_file(char* filename)
                if(ReadFile(file_handle, result, file_size_32, &bytes_read, NULL) &&
                   file_size_32 == bytes_read)
                {
-
+                    file_data.memory = result;
+                    file_data.file_size = bytes_read;
                }
                else
                {
@@ -459,7 +460,7 @@ internal void *debug_platform_read_entire_file(char* filename)
        //add logging
    }
 
-   return result;
+   return file_data;
 }
 
 int WINAPI WinMain(
@@ -495,9 +496,7 @@ int WINAPI WinMain(
         );
 
         if(WindowHandle != NULL)
-        {
-            int xOffset = 0, yOffset = 0;
-            
+        {            
             MSG message;
             HDC deviceContext = GetDC(WindowHandle);
             XINPUT_STATE ControllerState;
@@ -524,13 +523,14 @@ int WINAPI WinMain(
             char buffer[256];
 
             //controller input
+            Win32XLoadInput();
             game_input controller_input[2] = {}, \
                        old_input = controller_input[0], \
                        new_input = controller_input[1];
 
             int num_controllers = array_count(new_input.controllers);
 
-            int max_controller_count = XUSER_MAX_COUNT > num_controllers ? num_controllers : XUSER_MAX_COUNT;
+            DWORD max_controller_count = XUSER_MAX_COUNT > num_controllers ? num_controllers : XUSER_MAX_COUNT;
 
             //allocate game memory
             #ifndef HANDMADE_INTERNAL
@@ -563,7 +563,7 @@ int WINAPI WinMain(
                     }
 
                     //get controller input
-                    for(DWORD controllerIndex = 0; controllerIndex < XUSER_MAX_COUNT;++controllerIndex)
+                    for(DWORD controllerIndex = 0; controllerIndex < max_controller_count;++controllerIndex)
                     {
                         if(XInputGetState(controllerIndex,&ControllerState) == ERROR_SUCCESS)
                         {
@@ -650,7 +650,8 @@ int WINAPI WinMain(
                     GameUpdateAndRender(g_memory,new_input, game_display,game_sound_buffer);
 
                     //sound output test
-                    Win32FillSoundBuffer(direct_sound_buffer,win32_sound_config, game_sound_buffer, byte_to_lock, bytes_to_write);
+                    if(sound_is_valid)
+                        Win32FillSoundBuffer(direct_sound_buffer,win32_sound_config, game_sound_buffer, byte_to_lock, bytes_to_write);
 
                     win32_window_dimension wd = get_window_dimension(WindowHandle);
                     Win32CopyBufferToWindow(deviceContext, wd.Width,wd.Height,global_back_buffer);
@@ -665,14 +666,15 @@ int WINAPI WinMain(
                     frames_per_second = static_cast<real32>(perf_count_frequency / (1.0f * counter_elapsed));
                     million_cycles_per_frame = static_cast<real32>(elapsed_cycles / 1'000'000.0f);
 
-    /*
-                    sprintf(buffer,
-                            "Milliseconds/frame: %.02f, FPS: %.02f, million cycles per frame: %.02f",
-                            ms_per_frame, 
-                            frames_per_second,
-                            million_cycles_per_frame);
-                
-                    printf("%s\n",buffer);*/
+                    #ifdef HANDMADE_SLOW
+                        sprintf(buffer,
+                                "Milliseconds/frame: %.02f, FPS: %.02f, million cycles per frame: %.02f",
+                                ms_per_frame, 
+                                frames_per_second,
+                                million_cycles_per_frame);
+                    
+                        printf("%s\n",buffer);
+                    #endif
                     std::swap(new_input,old_input);
                 }
                 ReleaseDC(WindowHandle,deviceContext);

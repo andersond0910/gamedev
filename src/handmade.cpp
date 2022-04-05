@@ -45,9 +45,12 @@ internal void GameUpdateAndRender(game_memory& memory, game_input& input,game_of
     if(!memory.is_initialized)
     {
         char* filename = "test.bmp";
-        void* bitmap_memory = debug_platform_read_entire_file(filename);
-        if(bitmap_memory)
-            debug_platform_free_file_memory(bitmap_memory);
+        game_file_data data = debug_platform_read_entire_file(filename);
+        if(data.memory)
+        {
+            debug_platform_write_entire_file("test.out",data.file_size,data.memory);
+            debug_platform_free_file_memory(data.memory);
+        }
         
         state->tone_hz = 256;
         memory.is_initialized = true;

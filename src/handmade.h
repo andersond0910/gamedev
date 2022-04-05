@@ -125,6 +125,12 @@ struct game_state
     int tone_hz = 256;
 };
 
+struct game_file_data
+{
+    void* memory;
+    uint64 file_size;
+};
+
 uint32 safe_truncate_uint_64(uint64 file_size)
 {
     Assert(file_size <= 0xFFFFFFFF);
@@ -137,7 +143,7 @@ uint32 safe_truncate_uint_64(uint64 file_size)
     services that the platform layer provides to the game
 */
 #ifdef HANDMADE_INTERNAL
-    internal void *debug_platform_read_entire_file(char* filename);
+    internal game_file_data debug_platform_read_entire_file(char* filename);
     internal void debug_platform_free_file_memory(void *bitmap_memory);
     internal bool debug_platform_write_entire_file(char* filename, uint64 memory_size, void *memory);
 #endif
@@ -147,4 +153,4 @@ uint32 safe_truncate_uint_64(uint64 file_size)
 */
 
 //needs four things - timing, controller/keyboard input, bitmap to output, sound to output
-static void GameUpdateAndRender(game_memory*,game_input& input,game_offscreen_buffer&,game_sound_output_buffer&);
+internal void GameUpdateAndRender(game_memory& memory, game_input& input,game_offscreen_buffer& buffer,game_sound_output_buffer& sound_buffer);
