@@ -1,2 +1,7 @@
 win32_handmade.exe
 .project
+*.o
+.vscode/
+gcm.cache/
+build/
+*.code-workspace

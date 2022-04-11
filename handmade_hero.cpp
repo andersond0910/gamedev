@@ -1,6 +1,12 @@
-#include "handmade.h"
+module;
+#include<cstdint>
+#include<cmath>
+#include "handmade_misc.h"
+import handmade;
+import platform_layer;
+export module handmade_hero;
 
-internal void OutputGameSound(game_sound_output_buffer& sound_buffer, int tone_hz)
+void OutputGameSound(game_sound_output_buffer& sound_buffer, int tone_hz)
 {
     const float Pi32 = 3.14159265359;
 
@@ -19,23 +25,24 @@ internal void OutputGameSound(game_sound_output_buffer& sound_buffer, int tone_h
     }
 }
 
-internal void RenderWeirdGradient(game_offscreen_buffer& buffer, int blue_offset, int green_offset)
+void RenderWeirdGradient(game_offscreen_buffer& buffer, int blue_offset, int green_offset)
 {
-	auto Row = reinterpret_cast<uint8_t*>(buffer.Memory);
-	for(int y=0;y<buffer.Height;++y)
-	{
-		auto Pixel = reinterpret_cast<uint32_t*>(Row);
-		for(int x = 0; x < buffer.Width; ++x)
-		{
-			//Pixel in memory:  xx RR GG BB
-			uint32_t Blue = x+blue_offset, Green = y+green_offset;
-			*Pixel++ = ((Green << 8) | Blue);
-		}
-		Row += buffer.Pitch;
-	}
+    auto Row = reinterpret_cast<uint8_t*>(buffer.Memory);
+    for(int y=0;y<buffer.Height;++y)
+    {
+        auto Pixel = reinterpret_cast<uint32_t*>(Row);
+        for(int x = 0; x < buffer.Width; ++x)
+        {
+            //Pixel in memory:  xx RR GG BB
+            uint32_t Blue = x+blue_offset, Green = y+green_offset;
+            *Pixel++ = ((Green << 8) | Blue);
+        }
+        Row += buffer.Pitch;
+    }
 }
 
-internal void GameUpdateAndRender(game_memory& memory, game_input& input,game_offscreen_buffer& buffer,game_sound_output_buffer& sound_buffer)
+//needs four things - timing, controller/keyboard input, bitmap to output, sound to output
+export void GameUpdateAndRender(game_memory& memory, game_input& input,game_offscreen_buffer& buffer,game_sound_output_buffer& sound_buffer, platform_layer& platform)
 {
     Assert(sizeof(game_state) <= memory.permanent_storage_size);
     auto state = reinterpret_cast<game_state*>(memory.permanent_memory);
@@ -45,11 +52,11 @@ internal void GameUpdateAndRender(game_memory& memory, game_input& input,game_of
     if(!memory.is_initialized)
     {
         char* filename = "test.bmp";
-        game_file_data data = debug_platform_read_entire_file(filename);
+        game_file_data data = platform.debug_platform_read_entire_file(filename);
         if(data.memory)
         {
-            debug_platform_write_entire_file("test.out",data.file_size,data.memory);
-            debug_platform_free_file_memory(data.memory);
+            platform.debug_platform_write_entire_file("test.out",data.file_size,data.memory);
+            platform.debug_platform_free_file_memory(data.memory);
         }
         
         state->tone_hz = 256;
