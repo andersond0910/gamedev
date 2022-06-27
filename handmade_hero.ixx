@@ -41,12 +41,12 @@ void RenderWeirdGradient(game_offscreen_buffer& buffer, int blue_offset, int gre
     }
 }
 
-//needs four things - timing, controller/keyboard input, bitmap to output, sound to output
-export void GameUpdateAndRender(game_memory& memory, game_input& input,game_offscreen_buffer& buffer,game_sound_output_buffer& sound_buffer, platform_layer& platform)
+export void GameUpdateAndRender(game_memory& memory, game_input& input, 
+                                game_offscreen_buffer& buffer,game_sound_output_buffer& sound_buffer,
+                                platform_layer& platform)
 {
     Assert(sizeof(game_state) <= memory.permanent_storage_size);
     auto state = reinterpret_cast<game_state*>(memory.permanent_memory);
-    auto player_1 = input.controllers[0];
 
     //TODO should be moved to platform layer
     if(!memory.is_initialized)
@@ -64,22 +64,34 @@ export void GameUpdateAndRender(game_memory& memory, game_input& input,game_offs
     }
 
     //TODO: needs tuning for analog movement
-    if(player_1.is_analog)
+    for(auto controller : input.controllers)
     {
-        state->tone_hz = 256 + static_cast<int>(128.0f * (player_1.end_x));
-        state->blue_offset += static_cast<int>(4.0f*player_1.end_y);
-    }
-    //needs tuning for digital movement
-    else
-    {
+        if(controller.is_connected)
+        {
+            if(controller.is_analog)
+            {
+                state->tone_hz = 256 + static_cast<int>(128.0f * (controller.stick_average_x));
+                state->blue_offset += static_cast<int>(4.0f*controller.stick_average_y);
+            }
+            //needs tuning for digital movement
+            else
+            {
+                if(controller.move_left.ended_down)
+                    state->blue_offset -= 1;
 
-    }
+                if(controller.move_right.ended_down)
+                    state->blue_offset += 1;
+            }
 
-    if(player_1.down.ended_down)
-    {
-        state->green_offset += 1;
+            if(controller.action_down.ended_down)
+            {
+                state->green_offset += 1;
+            }
+        }
     }
 
     OutputGameSound(sound_buffer, state->tone_hz);
     RenderWeirdGradient(buffer,state->blue_offset, state->green_offset);
 }
+//needs four things - timing, controller/keyboard input, bitmap to output, sound to output
+//export 

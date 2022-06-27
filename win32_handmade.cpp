@@ -5,47 +5,21 @@
 #include <cstdio>
 #include <algorithm> 
 #include "handmade_misc.h"
+#include <cmath>
 import handmade;
-import platform_layer;
+//import platform_layer;
 import handmade_hero;
 import win32_platform_layer;
 
 global_variable win32_offscreen_buffer global_back_buffer;
 global_variable bool Running = true;
 
-#define X_INPUT_GET_STATE(name) DWORD name(DWORD dwUserIndex, XINPUT_STATE *pState)
-typedef X_INPUT_GET_STATE(x_input_get_state);
-X_INPUT_GET_STATE(XInputGetStateStub){
-    return ERROR_DEVICE_NOT_CONNECTED;
-}
-static x_input_get_state *XInputGetState_ = XInputGetStateStub;
-#define XInputGetState XInputGetState_
-
-#define X_INPUT_SET_STATE(name) DWORD name(DWORD dwUserIndex, XINPUT_VIBRATION *pVibration)
-typedef X_INPUT_SET_STATE(x_input_set_state);
-X_INPUT_SET_STATE(XInputSetStateStub){
-    return ERROR_DEVICE_NOT_CONNECTED;
-}
-static x_input_set_state *XInputSetState_ = XInputSetStateStub;
-#define XInputSetState XInputSetState_
-
-void Win32XLoadInput()
-{
-	auto XInputLdLbry = LoadLibraryA("XInput1_4.dll");
-	if(!XInputLdLbry)
-		XInputLdLbry =  LoadLibraryA("XInput1_3.dll");
-
-	XInputGetState = reinterpret_cast<x_input_get_state*>(GetProcAddress(XInputLdLbry,"XInputGetState"));
-	XInputSetState = reinterpret_cast<x_input_set_state*>(GetProcAddress(XInputLdLbry,"XInputSetState"));
-}
-
 LRESULT CALLBACK WindowProc(HWND Window, UINT Message, WPARAM wParam, LPARAM lParam)
 {
 	LRESULT result = 0;
 	HDC deviceContext;
 	PAINTSTRUCT paintStruct;
-	const long keyDownBit = (1 << 30);
-	const long keyUpBit = (1 << 31);
+
 	switch(Message)
 	{
 		case WM_SIZE:
@@ -64,63 +38,6 @@ LRESULT CALLBACK WindowProc(HWND Window, UINT Message, WPARAM wParam, LPARAM lPa
 		{
 			OutputDebugStringA("WM_ACTIVATEAPP\n");
 		} break;
-		case WM_SYSKEYDOWN:
-		case WM_SYSKEYUP:
-		case WM_KEYDOWN:
-		case WM_KEYUP:
-		{
-			uint32 vkCode = wParam;
-			bool wasDown = ((lParam & keyDownBit) != 0);
-			bool isDown = ((lParam & keyUpBit) != 0);
-			if(wasDown != isDown)
-			{
-				switch(vkCode)
-				{
-					case 'W':
-					{}break;
-					case 'A':
-					{}break;
-					case 'S':
-					{}break;
-					case 'D':
-					{}break;
-					case 'Q':
-					{}break;
-					case 'E':
-					{}break;
-					case VK_UP:
-					{
-
-					}
-					break;
-					case VK_DOWN:
-					{
-
-					}
-					break;
-					case VK_LEFT:
-					{
-
-					}
-					break;
-					case VK_RIGHT:
-					{
-
-					}
-					break;
-					case VK_ESCAPE:
-					{
-
-					}
-					break;
-				}
-			}
-			auto altKeyDownBit = (1 << 29);
-			bool altKeyDown = ((lParam & altKeyDownBit) != 0);
-			if(vkCode == VK_F4 && altKeyDown)
-				Running = false;
-
-		}break;
 		case WM_PAINT:
 		{
 			deviceContext= BeginPaint(Window,  &paintStruct);
@@ -139,14 +56,6 @@ LRESULT CALLBACK WindowProc(HWND Window, UINT Message, WPARAM wParam, LPARAM lPa
 	return result;
 }
 
-
-
-template<typename T>
-internal size_t array_count(T array[])
-{
-	return sizeof(*array) / sizeof(array[0]);
-}
-
 int WINAPI WinMain(
     HINSTANCE hInstance,
     HINSTANCE hPrevInstance,
@@ -162,7 +71,7 @@ int WINAPI WinMain(
     window_class.hInstance = hInstance;
     LPCSTR className = "HandmadeHeroWindowClass", window_name="Handmade Hero";
     window_class.lpszClassName = className;
-
+	
     if(RegisterClassA(&window_class))
     {
         HWND WindowHandle = CreateWindowA(
@@ -176,7 +85,7 @@ int WINAPI WinMain(
             0,
             0,
             hInstance,
-            0
+            NULL
         );
 
         if(WindowHandle != NULL)
@@ -209,7 +118,8 @@ int WINAPI WinMain(
 
             //controller input
             Win32XLoadInput();
-            game_input controller_input[2] = {}, old_input = controller_input[0], new_input = controller_input[1], temp;
+            game_input old_input = {}, new_input = {}, temp;
+			DWORD our_controller_index;
 
             int num_controllers = array_count(new_input.controllers);
 
@@ -234,72 +144,25 @@ int WINAPI WinMain(
             {
                 while(Running)
                 {
+					game_controller_input *old_keyboard_controller = get_game_controller(old_input, 0);
+					game_controller_input *new_keyboard_controller = get_game_controller(new_input, 0);
+                    
+                    game_controller_input zero_controller = {};
+					*new_keyboard_controller = zero_controller;
+                    new_keyboard_controller->is_connected = true;
+
+                    for(int ButtonIndex = 0; ButtonIndex < array_count(old_keyboard_controller->buttons); ++ButtonIndex)
+                    {
+                        new_keyboard_controller->buttons[ButtonIndex].ended_down = old_keyboard_controller->buttons[ButtonIndex].ended_down;
+                    }
+
                     QueryPerformanceCounter(&begin_counter);
                     begin_cycle_count = __rdtsc();
-                    while(PeekMessage(&message,WindowHandle,0,0,PM_REMOVE))
-                    {
-                        if(message.message == WM_QUIT)
-                            Running = false;
 
-                        TranslateMessage(&message);
-                        DispatchMessage(&message);
-                    }
+					Win32ProcessKeyboardMessages(*new_keyboard_controller, WindowHandle, Running);
 
                     //get controller input
-                    for(DWORD controllerIndex = 0; controllerIndex < max_controller_count;++controllerIndex)
-                    {
-                        if(XInputGetState(controllerIndex,&ControllerState) == ERROR_SUCCESS)
-                        {
-                            PXINPUT_GAMEPAD Pad = &ControllerState.Gamepad;
-                            bool dPadUp = (Pad->wButtons & XINPUT_GAMEPAD_DPAD_UP);
-                            bool dPadDown = (Pad->wButtons & XINPUT_GAMEPAD_DPAD_DOWN);
-                            bool dPadLeft = (Pad->wButtons & XINPUT_GAMEPAD_DPAD_LEFT);
-                            bool dPadRight = (Pad->wButtons & XINPUT_GAMEPAD_DPAD_RIGHT);
-                            int16 StickX = Pad->sThumbLX;
-                            int16 StickY = Pad->sThumbRX;
-
-                            game_controller_input old_controller = old_input.controllers[controllerIndex];
-                            game_controller_input new_controller = new_input.controllers[controllerIndex];
-
-                            new_controller.is_analog = true;
-                            new_controller.start_x = old_controller.end_x;
-                            new_controller.start_y = old_controller.end_y;
-
-                            real32 x = StickX < 0 ? (real32)StickX / 32768.0f : (real32)StickX / 32767.0f;
-                            real32 y = StickY < 0 ? (real32)StickY / 32768.0f : (real32)StickY / 32767.0f;
-
-                            new_controller.min_x = new_controller.max_x = new_controller.end_x = x; 
-                            new_controller.min_y = new_controller.max_y = new_controller.end_y = y; 
-
-                            Win32ProcessXInputDigitalButton(old_controller.down,
-                                                            new_controller.down,
-                                                            Pad->wButtons, 
-                                                            XINPUT_GAMEPAD_A);
-
-                            Win32ProcessXInputDigitalButton(old_controller.right,
-                                                            new_controller.right,
-                                                            Pad->wButtons, XINPUT_GAMEPAD_B);
-
-                            Win32ProcessXInputDigitalButton(old_controller.left,
-                                                            new_controller.left,
-                                                            Pad->wButtons, XINPUT_GAMEPAD_X);
-
-                            Win32ProcessXInputDigitalButton(old_controller.up,
-                                                            new_controller.up,
-                                                            Pad->wButtons, XINPUT_GAMEPAD_Y);
-
-                            Win32ProcessXInputDigitalButton(old_controller.left_shoulder,
-                                                            new_controller.left_shoulder,
-                                                            Pad->wButtons, XINPUT_GAMEPAD_LEFT_SHOULDER);
-
-                            Win32ProcessXInputDigitalButton(old_controller.right_shoulder,
-                                                            new_controller.right_shoulder,
-                                                            Pad->wButtons, XINPUT_GAMEPAD_RIGHT_SHOULDER);
-
-                            bool gPadStart = (Pad->wButtons & XINPUT_GAMEPAD_START);
-                            bool gPadBack = (Pad->wButtons & XINPUT_GAMEPAD_BACK);	
-                        }
-                    }
+                    Win32ProcessControllerMessages(old_input, new_input, max_controller_count, ControllerState);
 
                     DWORD play_cursor, write_cursor, target_cursor;
                     DWORD bytes_to_write, byte_to_lock;

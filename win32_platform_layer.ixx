@@ -9,8 +9,35 @@ import platform_layer;
 import handmade;
 export module win32_platform_layer;
 
+#define X_INPUT_GET_STATE(name) DWORD name(DWORD dwUserIndex, XINPUT_STATE *pState)
+typedef X_INPUT_GET_STATE(x_input_get_state);
+X_INPUT_GET_STATE(XInputGetStateStub){
+    return ERROR_DEVICE_NOT_CONNECTED;
+}
+static x_input_get_state *XInputGetState_ = XInputGetStateStub;
+#define XInputGetState XInputGetState_
+
+#define X_INPUT_SET_STATE(name) DWORD name(DWORD dwUserIndex, XINPUT_VIBRATION *pVibration)
+typedef X_INPUT_SET_STATE(x_input_set_state);
+X_INPUT_SET_STATE(XInputSetStateStub){
+    return ERROR_DEVICE_NOT_CONNECTED;
+}
+static x_input_set_state *XInputSetState_ = XInputSetStateStub;
+#define XInputSetState XInputSetState_
+
+
 export 
 {
+    void Win32XLoadInput()
+    {
+        auto XInputLdLbry = LoadLibraryA("XInput1_4.dll");
+        if(!XInputLdLbry)
+            XInputLdLbry =  LoadLibraryA("XInput1_3.dll");
+
+        XInputGetState = reinterpret_cast<x_input_get_state*>(GetProcAddress(XInputLdLbry,"XInputGetState"));
+        XInputSetState = reinterpret_cast<x_input_set_state*>(GetProcAddress(XInputLdLbry,"XInputSetState"));
+    }
+    
     class windows_layer : public platform_layer 
     {
         public:
@@ -108,7 +135,7 @@ export
 
                     auto error_flag = WriteFile (file_handle, lpBuffer, nNumberOfBytesToWrite, &lpNumberOfBytesWritten, lpOverlapped);
 
-                    if(error_flag && memory_size == lpNumberOfBytesWritten)
+                    if(error_flag && nNumberOfBytesToWrite == lpNumberOfBytesWritten)
                     {
                         result = true;
                     }
@@ -307,7 +334,7 @@ export
     }
 
     void Win32FillSoundBuffer(LPDIRECTSOUNDBUFFER sound_buffer, win32_sound_output &sound_output,
-                            game_sound_output_buffer& source, DWORD byte_to_lock, DWORD bytes_to_write)
+                              game_sound_output_buffer& source, DWORD byte_to_lock, DWORD bytes_to_write)
     {
         DWORD write_cursor, play_cursor;
         LPVOID region_1, region_2;
@@ -352,7 +379,222 @@ export
         new_state.ended_down = (button_state & button_bit) == button_bit;
         new_state.half_transition_count = old_state.ended_down != new_state.ended_down ? 1 : 0;
     }
+
+    void Win32ProcessKeyboardInput(game_button_state& new_state, bool is_down)
+    {
+        new_state.ended_down = is_down;
+        ++new_state.half_transition_count;
+    }
+
+    void Win32ProcessKeyboardMessages(game_controller_input& keyboard_controller, HWND WindowHandle, bool &Running)
+    {
+        MSG message;
+        const long keyDownBit = (1 << 30);
+        const long keyUpBit = (1 << 31);
+
+        while(PeekMessage(&message,WindowHandle,0,0,PM_REMOVE))
+        {
+            if(message.message == WM_QUIT)
+                Running = false;
+            
+            switch(message.message)
+            {
+                case WM_SYSKEYDOWN:
+                case WM_SYSKEYUP:
+                case WM_KEYDOWN:
+                case WM_KEYUP:
+                {
+                    uint32 vkCode = static_cast<uint32>(message.wParam);
+                    bool wasDown = ((message.lParam & keyDownBit) != 0);
+                    bool isDown = ((message.lParam & keyUpBit) == 0);
+                    if(wasDown != isDown)
+                    {
+                        switch(vkCode)
+                        {
+                            case 'W':
+                            {
+                                Win32ProcessKeyboardInput(keyboard_controller.move_up, isDown);
+                            }break;
+                            case 'A':
+                            {
+                                Win32ProcessKeyboardInput(keyboard_controller.move_left, isDown);
+                            }break;
+                            case 'S':
+                            {
+                                Win32ProcessKeyboardInput(keyboard_controller.move_right, isDown);
+                            }break;
+                            case 'D':
+                            {
+                                Win32ProcessKeyboardInput(keyboard_controller.move_down, isDown);
+                            }break;
+                            case 'Q':
+                            {
+                                Win32ProcessKeyboardInput(keyboard_controller.left_shoulder, isDown);
+                            }break;
+                            case 'E':
+                            {
+                                Win32ProcessKeyboardInput(keyboard_controller.right_shoulder, isDown);
+                            }break;
+                            case VK_UP:
+                            {
+                                Win32ProcessKeyboardInput(keyboard_controller.action_up, isDown);
+                            }
+                            break;
+                            case VK_DOWN:
+                            {
+                                Win32ProcessKeyboardInput(keyboard_controller.action_down, isDown);
+                            }
+                            break;
+                            case VK_LEFT:
+                            {
+                                Win32ProcessKeyboardInput(keyboard_controller.action_left, isDown);
+                            }
+                            break;
+                            case VK_RIGHT:
+                            {
+                                Win32ProcessKeyboardInput(keyboard_controller.action_right, isDown);
+                            }
+                            break;
+                            case VK_ESCAPE:
+                            {
+                                Running = false;
+                            }
+                            break;
+                        }
+                    }
+                    auto altKeyDownBit = (1 << 29);
+                    bool altKeyDown = ((message.lParam & altKeyDownBit) != 0);
+                    if(vkCode == VK_F4 && altKeyDown)
+                        Running = false;
+
+                }break;
+                default:
+                {
+                    TranslateMessage(&message);
+                    DispatchMessage(&message);
+                }
+            }
+        }
+    }
+
+    real32 Win32ProcessXInputStickValue(SHORT value, SHORT dead_zone_threshold)
+    {
+        real32 result = 0;
+
+        if(value < -dead_zone_threshold)
+            result = static_cast<real32>(value) / 32768.0f;
+        else if(value > dead_zone_threshold)
+            result = static_cast<real32>(value) / 32767.0f;
+
+        return result;
+    }
+
+    void Win32ProcessControllerMessages(game_input& old_input, game_input& new_input, DWORD max_controller_count, XINPUT_STATE& controller_state)
+    {
+        for(DWORD controllerIndex = 0; controllerIndex < max_controller_count;++controllerIndex)
+        {
+            DWORD our_controller_index = controllerIndex + 1;
+            game_controller_input old_controller = *get_game_controller(old_input, our_controller_index);
+            game_controller_input new_controller = *get_game_controller(new_input, our_controller_index);
+
+            if(XInputGetState(controllerIndex,&controller_state) == ERROR_SUCCESS)
+            {
+                PXINPUT_GAMEPAD Pad = &controller_state.Gamepad;
+                bool dPadUp = (Pad->wButtons & XINPUT_GAMEPAD_DPAD_UP);
+                bool dPadDown = (Pad->wButtons & XINPUT_GAMEPAD_DPAD_DOWN);
+                bool dPadLeft = (Pad->wButtons & XINPUT_GAMEPAD_DPAD_LEFT);
+                bool dPadRight = (Pad->wButtons & XINPUT_GAMEPAD_DPAD_RIGHT);
+                int16 StickX = Pad->sThumbLX;
+                int16 LStickY = Pad->sThumbLY;
+                int16 StickY = Pad->sThumbRX;
+
+
+                new_controller.is_analog = true;
+                new_controller.is_connected = true;
+
+                real32 x = 0; 
+                real32 y = 0;
+                real32 threshold = 0.5f;
+
+                new_controller.stick_average_x = Win32ProcessXInputStickValue(
+                    StickX, XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE);
+                new_controller.stick_average_y = Win32ProcessXInputStickValue(
+                    LStickY, XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE);
+
+                if(dPadUp)
+                    new_controller.stick_average_y = 1.0f;
+                if(dPadDown)
+                    new_controller.stick_average_y -= 1.0f;
+                if(dPadLeft)
+                    new_controller.stick_average_x -= 1.0f;
+                if(dPadRight)
+                    new_controller.stick_average_y += 1.0f;
+                
+                
+
+                Win32ProcessXInputDigitalButton(old_controller.move_left,
+                                                new_controller.move_left,
+                                                (new_controller.stick_average_x < -threshold) ? 1 : 0, 
+                                                1);
+
+                Win32ProcessXInputDigitalButton(old_controller.move_right,
+                                                new_controller.move_right,
+                                                (new_controller.stick_average_x > threshold) ? 1 : 0, 
+                                                1);
+
+                Win32ProcessXInputDigitalButton(old_controller.move_down,
+                                                new_controller.move_down,
+                                                (new_controller.stick_average_y < -threshold) ? 1 : 0, 
+                                                1);
+
+
+                Win32ProcessXInputDigitalButton(old_controller.move_up,
+                                                new_controller.move_up,
+                                                (new_controller.stick_average_y > threshold) ? 1 : 0, 
+                                                1);
+
+                Win32ProcessXInputDigitalButton(old_controller.action_down,
+                                                new_controller.action_down,
+                                                Pad->wButtons, 
+                                                XINPUT_GAMEPAD_A);
+
+                Win32ProcessXInputDigitalButton(old_controller.action_right,
+                                                new_controller.action_right,
+                                                Pad->wButtons, XINPUT_GAMEPAD_B);
+
+                Win32ProcessXInputDigitalButton(old_controller.action_left,
+                                                new_controller.action_left,
+                                                Pad->wButtons, XINPUT_GAMEPAD_X);
+
+                Win32ProcessXInputDigitalButton(old_controller.action_up,
+                                                new_controller.action_up,
+                                                Pad->wButtons, XINPUT_GAMEPAD_Y);
+
+                Win32ProcessXInputDigitalButton(old_controller.left_shoulder,
+                                                new_controller.left_shoulder,
+                                                Pad->wButtons, XINPUT_GAMEPAD_LEFT_SHOULDER);
+
+                Win32ProcessXInputDigitalButton(old_controller.right_shoulder,
+                                                new_controller.right_shoulder,
+                                                Pad->wButtons, XINPUT_GAMEPAD_RIGHT_SHOULDER);
+
+
+                Win32ProcessXInputDigitalButton(old_controller.back,
+                                                new_controller.back,
+                                                Pad->wButtons, XINPUT_GAMEPAD_BACK);
+
+                Win32ProcessXInputDigitalButton(old_controller.start,
+                                                new_controller.start,
+                                                Pad->wButtons, XINPUT_GAMEPAD_START);                                
+
+                bool gPadStart = (Pad->wButtons & XINPUT_GAMEPAD_START);
+                bool gPadBack = (Pad->wButtons & XINPUT_GAMEPAD_BACK);	
+            }
+        }
+    }
 }
+
+
 
 //Stubs for XInput State Windows functions.  This allows use program to not have to use xbox controllers when it isn't available.  Input can 
 //be taken from the keyboard

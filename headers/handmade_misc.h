@@ -25,3 +25,9 @@ typedef uint32_t uint32;
 typedef uint64_t uint64;
 typedef float real32;
 typedef double real64;
+
+template<typename T>
+internal size_t array_count(T array[])
+{
+	return sizeof(*array) / sizeof(array[0]);
+}

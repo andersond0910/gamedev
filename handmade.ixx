@@ -45,28 +45,31 @@ export
 
     struct game_controller_input
     {
+        bool is_connected = false;
         bool is_analog;
-        real32 start_x;
-        real32 start_y;
-
-        real32 min_x;
-        real32 min_y;
-        real32 max_x;
-        real32 max_y;
-        real32 end_x;
-        real32 end_y;
+        real32 stick_average_x;
+        real32 stick_average_y;
 
         union
         {
-            game_button_state buttons[6];
+            game_button_state buttons[12];
             struct
             {
-                game_button_state up;
-                game_button_state down;
-                game_button_state left;
-                game_button_state right;
+                game_button_state move_up;
+                game_button_state move_down;
+                game_button_state move_left;
+                game_button_state move_right;
+                
+                game_button_state action_up;
+                game_button_state action_down;
+                game_button_state action_left;
+                game_button_state action_right;
+                
                 game_button_state left_shoulder;
                 game_button_state right_shoulder;
+
+                game_button_state back;
+                game_button_state start;
             };
         };
     };
@@ -74,7 +77,7 @@ export
     struct game_input
     {
         //TODO - insert clock value here
-        game_controller_input controllers[4];
+        game_controller_input controllers[5];
     };
 
     struct game_memory
@@ -110,4 +113,10 @@ export
         int Height;
         int Pitch;
     };
+
+    game_controller_input* get_game_controller(game_input& input, int index)
+    {
+        Assert(index < array_count(input.controllers));
+        return &input.controllers[index];
+    }
 }
